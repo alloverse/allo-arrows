@@ -1,10 +1,14 @@
-# Alloverse app template
+# Alloverse Arrows
 
 This is an Alloverse app. You can 
 [read about making apps](https://alloverse.com/develop-apps/)
 on Alloverse's website.
 
-__psst, you should summarize and explain your project here!__
+The first alloverse game! 
+
+Aim through the windshield, the farther afrom it you stand the harder you shoot.
+
+Hit the red balloons
 
 ## Developing
 
