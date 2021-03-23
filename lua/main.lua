@@ -30,38 +30,34 @@ mainView.color = {0.7, 0.7, 1.0, 0.2}
 mainView.hasCollider = true
 mainView.hasTransparency = true
 
-local crosshairs = ui.Surface(ui.Bounds(0, 0, 0.1,  0.3, 0.3, 0.3))
-crosshairs.color = {1, 0, 0, 1}
-crosshairs.grabbable = true
-crosshairs.texture = assets.crosshairs
-crosshairs.hasTransparency = true
-
-pp(crosshairs:specification())
-mainView:addSubview(crosshairs)
-
 -- matix to transform points from world to mainView space
 local toViewLocal = mat4.new(mainView.bounds.pose.transform)
 toViewLocal:invert(toViewLocal)
 
-local aim = {
-    from = vec3(),
-    to = vec3()
-}
+-- states
+local targets = {}
+local bullets = {}
+local players = {}
 
-local function updateHit(target, hit)
+local function updateHit(target, hit, bullet)
     if target.hit == hit then
         return
     end
     target.hit = hit
     if hit then 
+        if bullet then 
+            local player = players[bullet.player_id]
+            if player then 
+                player.score = (player.score or 0) + 1
+            end
+        end
         target:setColor({0, 1, 0, 0.5})
     else 
         target:setColor({1, 0, 0, 0.8})
     end
 end
 
-
-local targets = {}
+-- spawn some targets
 for i = 1, 5 do
     local pos = vec3.new(-10 + i * 2,1.7,-10 - i*2)
     local target = ui.Surface(ui.Bounds(pos.x, pos.y, pos.z,  2,2,2))
@@ -72,14 +68,34 @@ for i = 1, 5 do
     mainView:addSubview(target)
 end
 
-local bullets = {}
 
-local function shoot()
-    local p = toViewLocal * aim.from
+local function addPlayer(id)
+    print("adding player ".. id)
+    local crosshairs = ui.Surface(ui.Bounds(0, 0, 0.1,  0.3, 0.3, 0.3))
+    crosshairs.color = {1, 0, 0, 1}
+    crosshairs.grabbable = true
+    crosshairs.texture = assets.crosshairs
+    crosshairs.hasTransparency = true
+
+    mainView:addSubview(crosshairs)
+    players[id] = {
+        view = crosshairs,
+        lastSeen = os.time(),
+        aim = {
+            from = vec3(),
+            to = vec3()
+        },
+    }
+    return players[id]
+end
+
+local function shoot(player)
+    local p = toViewLocal * player.aim.from
     local bullet = Surface(ui.Bounds(p.x, p.y, p.z,  0.1, 0.1, 0.1))
     bullet.color = {1, 1, 0, 1}
+    bullet.player_id = player.id
     -- initial velocity
-    bullet.v = (aim.to - aim.from) * 4
+    bullet.v = (player.aim.to - player.aim.from) * 4
     mainView:addSubview(bullet)
     while #bullets > 2 do
         bullets[1]:removeFromSuperview()
@@ -91,25 +107,28 @@ end
 
 mainView.onInteraction = function (self, inter, body, sender)
     View.onInteraction(self, inter, body, sender)
-    if body[1] == "point" then 
-        
+    
+    if body[1] == "point" then
+        local player = players[sender.id] or addPlayer(sender.id)
         local p = vec3.new(table.unpack(body[3]))
         local mp = toViewLocal * p
         
-        crosshairs.bounds.pose.transform[13] = mp.x
-        crosshairs.bounds.pose.transform[14] = mp.y
-        crosshairs.bounds.pose.transform[15] = mp.z
+        player.view.bounds.pose.transform[13] = mp.x
+        player.view.bounds.pose.transform[14] = mp.y
+        player.view.bounds.pose.transform[15] = mp.z
 
-        aim = {
+        player.aim = {
             from = vec3.new(table.unpack(body[2])),
             to = vec3.new(table.unpack(body[3]))
         }
-        
+        player.lastSeen = os.time()
     end
+
     if body[1] == "poke" and body[2] == true then
-        shoot()
+        local player = players[sender.id] or addPlayer(sender.id)
+        shoot(player)
         
-        crosshairs:setBounds()
+        player.view:setBounds()
         mainView:setBounds()
     end
 end
@@ -129,7 +148,9 @@ local dt = 0.03
 app:scheduleAction(dt, true, function()
     if app.connected and animate then
         -- update the crosshairs
-        crosshairs:setBounds()
+        for _, player in pairs(players) do
+            player.view:setBounds()
+        end
         for i, bullet in ipairs(bullets) do
             -- update bullet position
             bullet.bounds.pose:move(bullet.v.x*dt, bullet.v.y*dt, bullet.v.z*dt)
@@ -146,19 +167,23 @@ app:scheduleAction(dt, true, function()
                 bullet:removeFromSuperview()
                 table.remove(bullets, i)
             else
-                -- Otherwise update bullets velocirt; add gravity
+                -- Otherwise update bullets velocity; add gravity
                 bullet.v.y = bullet.v.y - 9.82 * 0.03
                 bullet:setBounds()
 
                 -- Did it hit anything?
                 for _, target in ipairs(targets) do
                     if vec3.dist(target.pos, pos) < 1 then 
-                        updateHit(target, true)
+                        updateHit(target, true, bullet)
+                        -- remove bullet if it hit a target
+                        bullet:removeFromSuperview()
+                        table.remove(bullets, i)
                     end
                 end
             end
         end
 
+        -- tally the hit targets
         local hitCount = 0
         if not gameOver then
             for _, target in ipairs(targets) do
@@ -176,6 +201,18 @@ app:scheduleAction(dt, true, function()
                     gameOver = false
                 end)
             end 
+        end
+    end
+end)
+
+-- remove expired players
+app:scheduleAction(2, true, function()
+    local time = os.time()
+    for id, player in pairs(players) do
+        if player.lastSeen + 20 < time then 
+            print("removing player " .. id)
+            player.view:removeFromSuperview()
+            players[id] = nil
         end
     end
 end)
