@@ -18,6 +18,7 @@ local app = App(client)
 -- before you can use them. We make `assets` global so you can use it throughout your app.
 local assets = {
     crosshairs = ui.Asset.File("images/crosshairs.png"),
+    gun = ui.Asset.File("images/gun.glb"),
 }
 app.assetManager:add(assets)
 
@@ -33,6 +34,48 @@ mainView.hasTransparency = true
 -- matix to transform points from world to mainView space
 local toViewLocal = mat4.new(mainView.bounds.pose.transform)
 toViewLocal:invert(toViewLocal)
+
+local Gun = class.Gun()
+function Gun:_init(parent)
+    self.parent = parent
+end
+function Gun:spawn()
+    app.client:sendInteraction({
+        -- sender_entity_id = self.superview.entity.id,
+        receiver_entity_id = "place",
+        body = {
+            "spawn_entity",
+            self:specification()
+        }
+    })
+end
+function Gun:specification()
+    local m = mat4.new()
+    m:rotate(m, math.pi*0.5, vec3.new(0, 1, 0))
+    m:rotate(m, math.pi*0.5, vec3.new(0, 0, 1))
+    m:scale(m, vec3.new(0.5, 0.5, 0.5))
+    m._m = nil;
+    local spec = {
+        gun = {},
+        relationships = {
+            parent = self.parent.id,
+        },
+        geometry = {
+            type = "asset",
+            name = assets.gun:id(),
+        },
+        transform = {
+            matrix = m,
+        },
+        collider = {
+            type= "box",
+            width = 0.1,
+            height = 0.1, 
+            depth = 0.1
+        }
+    }
+    return spec
+end
 
 -- states
 local targets = {}
@@ -67,15 +110,24 @@ for i = 1, 5 do
     mainView:addSubview(target)
 end
 
+local T = {}
 
-local function getPlayer(sender_or_id)
+local function getPlayer(sender_or_id, createIfMissing)
     if type(sender_or_id) == "string" then
         return players[sender_or_id]
     end
-    local player = sender_or_id:getParent() or sender_or_id
+    local player = (sender_or_id.components.visor and sender_or_id) or (sender_or_id:getParent()) or sender_or_id
     local id = player.id
     if players[id] then 
         return players[id]
+    end
+    if not createIfMissing then 
+        return nil
+    end
+
+    if not player.components.visor then 
+        print("Will only create player for visors")
+        return nil
     end
     local name = player.components.visor.display_name or id
     print("adding player " .. name .. "(" .. id .. ")")
@@ -83,7 +135,9 @@ local function getPlayer(sender_or_id)
     crosshairs.color = {1, 0, 0, 1}
     crosshairs.texture = assets.crosshairs
     crosshairs.hasTransparency = true
-
+    crosshairs.hasCollider = true
+    crosshairs.onInteraction = T.crosshairsInteraction
+    
     mainView:addSubview(crosshairs)
     players[id] = {
         name = name,
@@ -116,31 +170,34 @@ local function shoot(player)
     table.insert(bullets, bullet)
 end
 
+T.crosshairsInteraction = function(self, iter, body, sender)
+    if body[1] == "poke" and body[2] == true then
+        pp(sender:getParent())
+        local player = getPlayer(sender)
+        shoot(player)
+        
+        player.view:setBounds()
+        mainView:setBounds()
+    end
+end
+
 mainView.onInteraction = function (self, inter, body, sender)
     View.onInteraction(self, inter, body, sender)
     
     if body[1] == "point" then
-        local player = getPlayer(sender)
+        local player = getPlayer(sender, true)
         local p = vec3.new(table.unpack(body[3]))
         local mp = toViewLocal * p
         
-        player.view.bounds.pose.transform[13] = mp.x
-        player.view.bounds.pose.transform[14] = mp.y
-        player.view.bounds.pose.transform[15] = mp.z
+        -- player.view.bounds.pose.transform[13] = mp.x
+        -- player.view.bounds.pose.transform[14] = mp.y
+        -- player.view.bounds.pose.transform[15] = mp.z
 
         player.aim = {
             from = vec3.new(table.unpack(body[2])),
             to = vec3.new(table.unpack(body[3]))
         }
         player.lastSeen = os.time()
-    end
-
-    if body[1] == "poke" and body[2] == true then
-        local player = getPlayer(sender)
-        shoot(player)
-        
-        player.view:setBounds()
-        mainView:setBounds()
     end
 end
 
@@ -150,6 +207,28 @@ local function blink(t, hit)
             updateHit(target, hit)
         end
     end)
+end
+
+app.client.delegates.onComponentChanged = function(key, new, old)
+    if key == "transform" then
+        local player = getPlayer(new:getEntity())
+        if player then
+            local ent = new:getEntity()
+            if not player.gun and ent.components.intent.actuate_pose:match("hand") then 
+                player.gun = Gun(ent)
+                player.gun:spawn()
+            end
+
+            if ent.components.intent.actuate_pose:match("hand") and player.view.bounds.pose.transform then
+                local t = player.view.bounds.pose.transform
+                local m = ent.components.transform.matrix
+                for i, _ in ipairs(t) do
+                    t[i] = m[i]
+                end
+                pp(new:getEntity())
+            end
+        end
+    end
 end
 
 -- Add a little bit of animation
