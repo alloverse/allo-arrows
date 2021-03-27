@@ -30,7 +30,17 @@ ecs:system({"bullet"}, function (entity, dt)
     m:translate(m, vec3.new(entity.components.bullet.speed) * dt)
     m._m = nil
     entity.components.transform.matrix = m
-    client:update(entity)
+
+    local owner_ent = ecs:withId(entity.components.bullet.owner)
+    local om = owner_ent.components.transform.matrix
+    local bullet_pos = vec3.new(m[13], m[14], m[15])
+    local owner_pos = vec3.new(om[13], om[14], om[15])
+    local dist = vec3.dist(bullet_pos, owner_pos)
+    if dist > 10 then 
+        client:despawn(entity.id)
+    else
+        client:update(entity)
+    end
 end)
 
 client.update = function (self, entity, components)
@@ -65,6 +75,19 @@ client.spawn = function (self, spec, callback)
     end)
 end
 
+client.despawn = function (self, entity_id, callback)
+    self:sendInteraction({
+        sender_entity_id = entity_id,
+        receiver_entity_id = "place",
+        body = {
+            "remove_entity",
+            entity_id
+        }
+    }, function ()
+        
+    end)
+end
+
 function MakeGun(parent_entity_id)
     local m = mat4.new()
     m:rotate(m, -math.pi*0.5, vec3.new(1, 0, 0))
@@ -93,7 +116,7 @@ function MakeGun(parent_entity_id)
     }
 end
 
-function MakeBullet(t)
+function MakeBullet(t, owner_id)
     local m = mat4.new()
     m:rotate(m, math.pi, vec3.new(0,1,0))
     m:scale(m, vec3.new(0.01))
@@ -107,6 +130,7 @@ function MakeBullet(t)
     m._m = nil
     return {
         bullet = {
+            owner = owner_id,
             speed = {forward.x, forward.y, forward.z}
         },
         geometry = {
@@ -162,7 +186,7 @@ client.delegates.onInteraction = function (inter, body)
             ent = ent and ecs:withId(ent)
             print("parent?", ent)
         end
-        client:spawn(MakeBullet(t))
+        client:spawn(MakeBullet(t, inter.sender_entity_id))
         -- body = [=[["poke", true]]=],
         -- receiver_entity_id = "dwajcukmgi",
         -- request_id = "nhak5eLjQZ73yhAy",
