@@ -1,5 +1,8 @@
 local mat4 = require('modules.mat4')
 local vec3 = require('modules.vec3')
+local pp = require('pl.pretty').dump
+local ECS = require 'ecs'
+
 -- a Client is used to connect this app to a Place. arg[2] is the URL of the place to
 -- connect to, which Assist sets up for you.
 local client = Client(
@@ -7,312 +10,174 @@ local client = Client(
     "allo-arrows"
 )
 
-local pp = require('pl.pretty').dump
+local ecs = ECS()
 
--- App manages the Client connection for you, and manages the lifetime of the
--- your app.
-local app = App(client)
-
--- Assets are files (images, glb models, videos, sounds, etc...) that you want to use
--- in your app. They need to be published so that user's headsets can download them
--- before you can use them. We make `assets` global so you can use it throughout your app.
 local assets = {
     crosshairs = ui.Asset.File("images/crosshairs.png"),
     gun = ui.Asset.File("images/gun.glb"),
+    bullet = ui.Asset.File("images/bullet.glb"),
 }
-app.assetManager:add(assets)
+local assetManager = ui.Asset.Manager(client.client)
+assetManager:add(assets)
 
--- mainView is the main UI for your app. Set it up before connecting.
--- 0, 1.2, -2 means: put the app centered horizontally; 1.2 meters up from the floor; and 2 meters into the room, depth-wise
--- 1, 0.5, 0.01 means 1 meter wide, 0.5 meters tall, and 1 cm deep.
--- It's a surface, so the depth should be close to zero.
-local mainView = ui.Surface(ui.Bounds(0, 1.2, -2,   6, 5, 0.01))
-mainView.color = {0.7, 0.7, 1.0, 0.2}
-mainView.hasCollider = true
-mainView.hasTransparency = true
-
--- matix to transform points from world to mainView space
-local toViewLocal = mat4.new(mainView.bounds.pose.transform)
-toViewLocal:invert(toViewLocal)
-
-local Gun = class.Gun()
-function Gun:_init(parent)
-    self.parent = parent
+client.updateState = function (self, state)
+    ecs:setState(state)
+    ecs:update(1/20)
 end
-function Gun:spawn()
-    app.client:sendInteraction({
-        -- sender_entity_id = self.superview.entity.id,
+
+ecs:system({"bullet"}, function (entity, dt)
+    local m = mat4.new(entity.components.transform.matrix)
+    m:translate(m, vec3.new(entity.components.bullet.speed) * dt)
+    m._m = nil
+    entity.components.transform.matrix = m
+    client:update(entity)
+end)
+
+client.update = function (self, entity, components)
+    components = components or entity.components
+    self:sendInteraction({
+        sender_entity_id = entity.id,
+        receiver_entity_id = "place",
+        body = {
+            "change_components",
+            entity.id,
+            "add_or_change", components,
+            "remove", {}
+        }
+    }, function (r)
+        -- pp(r)
+    end)
+end
+
+client.spawn = function (self, spec, callback)
+    self:sendInteraction({
         receiver_entity_id = "place",
         body = {
             "spawn_entity",
-            self:specification()
+            spec,
         }
-    })
-end
-function Gun:specification()
-    local m = mat4.new()
-    m:rotate(m, math.pi*0.5, vec3.new(0, 1, 0))
-    m:rotate(m, math.pi*0.5, vec3.new(0, 0, 1))
-    m:scale(m, vec3.new(0.5, 0.5, 0.5))
-    m._m = nil;
-    local spec = {
-        gun = {},
-        relationships = {
-            parent = self.parent.id,
-        },
-        geometry = {
-            type = "asset",
-            name = assets.gun:id(),
-        },
-        transform = {
-            matrix = m,
-        },
-        collider = {
-            type= "box",
-            width = 0.1,
-            height = 0.1, 
-            depth = 0.1
-        }
-    }
-    return spec
-end
-
--- states
-local targets = {}
-local players = {}
-
-local function updateHit(target, hit, bullet)
-    if target.hit == hit then
-        return
-    end
-    target.hit = hit
-    if hit then 
-        if bullet then 
-            local player = players[bullet.player_id]
-            if player then 
-                player.score = (player.score or 0) + 1
-            end
-        end
-        target:setColor({0, 1, 0, 0.5})
-    else 
-        target:setColor({1, 0, 0, 0.8})
-    end
-end
-
--- spawn some targets
-for i = 1, 5 do
-    local pos = vec3.new(-10 + i * 2,1.7,-10 - i*2)
-    local target = ui.Surface(ui.Bounds(pos.x, pos.y, pos.z,  2,2,2))
-    target.pos = pos
-    target.hasTransparency = true
-    updateHit(target, false)
-    table.insert(targets, target)
-    mainView:addSubview(target)
-end
-
-local T = {}
-
-local function getPlayer(sender_or_id, createIfMissing)
-    if type(sender_or_id) == "string" then
-        return players[sender_or_id]
-    end
-    local player = (sender_or_id.components.visor and sender_or_id) or (sender_or_id:getParent()) or sender_or_id
-    local id = player.id
-    if players[id] then 
-        return players[id]
-    end
-    if not createIfMissing then 
-        return nil
-    end
-
-    if not player.components.visor then 
-        print("Will only create player for visors")
-        return nil
-    end
-    local name = player.components.visor.display_name or id
-    print("adding player " .. name .. "(" .. id .. ")")
-    local crosshairs = ui.Surface(ui.Bounds(0, 0, 0.1,  0.3, 0.3, 0.3))
-    crosshairs.color = {1, 0, 0, 1}
-    crosshairs.texture = assets.crosshairs
-    crosshairs.hasTransparency = true
-    crosshairs.hasCollider = true
-    crosshairs.onInteraction = T.crosshairsInteraction
-    
-    mainView:addSubview(crosshairs)
-    players[id] = {
-        name = name,
-        view = crosshairs,
-        lastSeen = os.time(),
-        aim = {
-            from = vec3(),
-            to = vec3()
-        },
-        bullets = {},
-        score = 0,
-        maxBullets = (name == "Voxar" or name == "Keanu") and 10 or 1,
-    }
-    return players[id]
-end
-
-local function shoot(player)
-    local p = toViewLocal * player.aim.from
-    local bullet = Surface(ui.Bounds(p.x, p.y, p.z,  0.1, 0.1, 0.1))
-    bullet.color = {1, 1, 0, 1}
-    bullet.player_id = player.id
-    -- initial velocity
-    bullet.v = (player.aim.to - player.aim.from) * 4
-    mainView:addSubview(bullet)
-    local bullets = player.bullets
-    while #bullets > player.maxBullets do
-        bullets[1]:removeFromSuperview()
-        table.remove(bullets, 1)
-    end
-    table.insert(bullets, bullet)
-end
-
-T.crosshairsInteraction = function(self, iter, body, sender)
-    if body[1] == "poke" and body[2] == true then
-        pp(sender:getParent())
-        local player = getPlayer(sender)
-        shoot(player)
-        
-        player.view:setBounds()
-        mainView:setBounds()
-    end
-end
-
-mainView.onInteraction = function (self, inter, body, sender)
-    View.onInteraction(self, inter, body, sender)
-    
-    if body[1] == "point" then
-        local player = getPlayer(sender, true)
-        local p = vec3.new(table.unpack(body[3]))
-        local mp = toViewLocal * p
-        
-        -- player.view.bounds.pose.transform[13] = mp.x
-        -- player.view.bounds.pose.transform[14] = mp.y
-        -- player.view.bounds.pose.transform[15] = mp.z
-
-        player.aim = {
-            from = vec3.new(table.unpack(body[2])),
-            to = vec3.new(table.unpack(body[3]))
-        }
-        player.lastSeen = os.time()
-    end
-end
-
-local function blink(t, hit)
-    app:scheduleAction(t, false, function()
-        for _, target in ipairs(targets) do
-            updateHit(target, hit)
+    }, function (inter, body)
+        if callback then 
+            callback(body[2])
+        else
+            pp(inter)
         end
     end)
 end
 
-app.client.delegates.onComponentChanged = function(key, new, old)
-    if key == "transform" then
-        local player = getPlayer(new:getEntity())
-        if player then
-            local ent = new:getEntity()
-            if not player.gun and ent.components.intent.actuate_pose:match("hand") then 
-                player.gun = Gun(ent)
-                player.gun:spawn()
-            end
+function MakeGun(parent_entity_id)
+    local m = mat4.new()
+    m:rotate(m, -math.pi*0.5, vec3.new(1, 0, 0))
+    m:rotate(m, math.pi*0.5, vec3.new(0, 1, 0))
+    m:scale(m, vec3.new(0.4))
+    m:translate(m, vec3.new(0.02, 0.04, 0.01))
+    m._m = nil
+    return {
+        geometry = {
+            type = "asset",
+            name = assets.gun:id()
+        },
+        transform = {
+            matrix = m,
+        },
+        relationships = {
+            parent = parent_entity_id
+        },
+        collider = {
+            type = "box",
+            width = 0.001,
+            height = 0.1,
+            depth = 0.1,
+            x = 1.5,
+        }
+    }
+end
 
-            if ent.components.intent.actuate_pose:match("hand") and player.view.bounds.pose.transform then
-                local t = player.view.bounds.pose.transform
-                local m = ent.components.transform.matrix
-                for i, _ in ipairs(t) do
-                    t[i] = m[i]
-                end
-                pp(new:getEntity())
-            end
+function MakeBullet(t)
+    local m = mat4.new()
+    m:rotate(m, math.pi, vec3.new(0,1,0))
+    m:scale(m, vec3.new(0.01))
+    m:translate(m, vec3.new(0.02,0.08,-0.2))
+    m = t * m
+    local q = mat4.new(t)
+    q[13] = 0
+    q[14] = 0
+    q[15] = 0
+    local forward = q * vec3.new(0, 0, -5)
+    m._m = nil
+    return {
+        bullet = {
+            speed = {forward.x, forward.y, forward.z}
+        },
+        geometry = {
+            type = "asset",
+            name = assets.bullet:id(),
+        },
+        transform = {
+            matrix = m,
+        },
+        material = {
+            shader_name = "pbr",
+        }
+    }
+end
+
+local Bullets = {
+    bullets = {},
+    requiredComponents = {"bullet"},
+    forEachEntity = function (self, ent)
+
+    end
+}
+
+local Guns = {
+    guns = {},
+    requiredComponents = {"intent"},
+    forEachEntity = function (self, ent)
+        if not ent.components.intent.actuate_pose:match("hand") then
+            return
         end
+        local guns = self.guns[ent.id]
+        if not guns then
+            print("adding gun")
+            self.guns[ent.id] = {}
+            client:spawn(MakeGun(ent.id), function (gunEntityId)
+                self.guns[ent.id].entity_id = gunEntityId
+            end)
+        end
+    end
+}
+
+client.delegates.onInteraction = function (inter, body)
+    -- if it's a poke and it's the start of the poke
+    if body[1] == "poke" and body[2] then
+        -- sender is the hand
+        local gun = Guns.guns[inter.sender_entity_id]
+        local gun_ent = ecs:withId(gun.entity_id)
+        local t = mat4.new()
+        local ent = ecs:withId(gun_ent.components.relationships.parent)
+        while ent do
+            t = mat4.new(ent.components.transform.matrix) * t
+            ent = ent.components.relationships and ent.components.relationships.parent
+            ent = ent and ecs:withId(ent)
+            print("parent?", ent)
+        end
+        client:spawn(MakeBullet(t))
+        -- body = [=[["poke", true]]=],
+        -- receiver_entity_id = "dwajcukmgi",
+        -- request_id = "nhak5eLjQZ73yhAy",
+        -- respond = "function: 0x02126658",
+        -- sender_entity_id = "meslawuivh",
+        -- type = "request"
     end
 end
 
--- Add a little bit of animation
-local animate = true
-local gameOver = false
-local dt = 0.03
-app:scheduleAction(dt, true, function()
-    if app.connected and animate then
-        -- update player crosshairs and bullets
-        for _, player in pairs(players) do
-            player.view:setBounds()
-            local bullets = player.bullets
-            for i, bullet in ipairs(bullets) do
-                -- update bullet position
-                bullet.bounds.pose:move(bullet.v.x*dt, bullet.v.y*dt, bullet.v.z*dt)
+ecs:addSystem(Guns)
 
-                -- get the bullet position to check against targets
-                local pos = vec3.new(
-                    bullet.bounds.pose.transform[13],
-                    bullet.bounds.pose.transform[14],
-                    bullet.bounds.pose.transform[15]
-                )
-
-                -- Check if it is below the ground, remove it if it is
-                if pos.y < -3 then
-                    bullet:removeFromSuperview()
-                    table.remove(bullets, i)
-                else
-                    -- Otherwise update bullets velocity; add gravity
-                    bullet.v.y = bullet.v.y - 9.82 * 0.03
-                    bullet:setBounds()
-
-                    -- Did it hit anything?
-                    for _, target in ipairs(targets) do
-                        if vec3.dist(target.pos, pos) < 1 then 
-                            updateHit(target, true, bullet)
-                            -- remove bullet if it hit a target
-                            bullet:removeFromSuperview()
-                            table.remove(bullets, i)
-                        end
-                    end
-                end
-            end
-        end
-
-        -- tally the hit targets
-        local hitCount = 0
-        if not gameOver then
-            for _, target in ipairs(targets) do
-                hitCount = hitCount + (target.hit and 1 or 0)
-            end
-            if not gameOver and hitCount == #targets then 
-                gameOver = true
-                local d = 0.3
-                blink(d, false)
-                blink(d*2, true)
-                blink(d*3, false)
-                blink(d*4, true)
-                blink(d*5, false)
-                app:scheduleAction(d*10, false, function()
-                    gameOver = false
-                end)
-            end 
-        end
-    end
-end)
-
--- remove expired players
-app:scheduleAction(2, true, function()
-    local time = os.time()
-    for id, player in pairs(players) do
-        if player.lastSeen + 20 < time then 
-            print("removing player " .. player.name .. "(" .. id .. ")")
-            player.view:removeFromSuperview()
-            players[id] = nil
-        end
-    end
-end)
-
--- Tell the app that mainView is the primary UI for this app
-app.mainView = mainView
-
--- Connect to the designated remote Place server
-app:connect()
--- hand over runtime to the app! App will now run forever,
--- or until the app is shut down (ctrl-C or exit button pressed).
-app:run()
+local deltaTime = 1/20
+local m = mat4.new()
+m._m = nil
+local running = client:connect({dummy = {}})
+while running do
+    client:poll(deltaTime)
+end
