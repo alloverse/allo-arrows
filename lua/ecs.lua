@@ -30,6 +30,13 @@ function ECS:withComponents(components)
     return list
 end
 
+function ECS:forEach(components, func)
+    local entities = self:withComponents(components)
+    for _, ent in ipairs(entities) do
+        func(ent)
+    end
+end
+
 function ECS:withId(id)
     return self.state.entities[id]
 end
