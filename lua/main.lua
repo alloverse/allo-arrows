@@ -142,7 +142,7 @@ client.spawn = function (self, spec, callback)
         if callback then 
             callback(body[2])
         else
-            pp(inter)
+            -- pp(inter)
         end
     end)
 end
