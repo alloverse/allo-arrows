@@ -18,6 +18,7 @@ local app = App(client)
 -- before you can use them. We make `assets` global so you can use it throughout your app.
 local assets = {
     crosshairs = ui.Asset.File("images/crosshairs.png"),
+    quit = ui.Asset.File("images/quit.png"),
 }
 app.assetManager:add(assets)
 
@@ -29,6 +30,15 @@ local mainView = ui.Surface(ui.Bounds(0, 1.2, -2,   6, 5, 0.01))
 mainView.color = {0.7, 0.7, 1.0, 0.2}
 mainView.hasCollider = true
 mainView.hasTransparency = true
+
+local quitButton = mainView:addSubview(ui.Button(
+    ui.Bounds{size=ui.Size(0.12,0.12,0.05)}
+        :move( mainView.bounds.size:getEdge("top", "right", "front") )
+))
+quitButton:setDefaultTexture(assets.quit)
+quitButton.onActivated = function()
+    app:quit()
+end
 
 local crosshairs = ui.Surface(ui.Bounds(0, 0, 0.1,  0.3, 0.3, 0.3))
 crosshairs.color = {1, 0, 0, 1}
