@@ -19,11 +19,11 @@ function os.uname()
 end
 
 if os.uname():find("^Darwin") ~= nil then
-    package.cpath = package.cpath..";"..libDir.."/osx64/?.dylib"
+    package.cpath = package.cpath..";"..libDir.."/?.dylib"
 elseif string.match(package.cpath, "so") then
-    package.cpath = package.cpath..";"..libDir.."/linux64/?.so"
+    package.cpath = package.cpath..";"..libDir.."/?.so"
 elseif string.match(package.cpath, "dll") then
-    package.cpath = package.cpath..";"..libDir.."/win64/?.dll"
+    package.cpath = package.cpath..";"..libDir.."/?.dll"
 end
 
 package.path = package.path
@@ -39,6 +39,21 @@ ui = require("alloui.ui")
 class = require('pl.class')
 tablex = require('pl.tablex')
 pretty = require('pl.pretty')
+vec3 = require("modules.vec3")
+mat4 = require("modules.mat4")
+
+ui.App.initialLocation = nil
+if arg[3] then
+    local ms = {string.match(arg[3], "([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+)")}
+    local x, y, z = string.match(arg[3], "([-+\\.%d]+),([-+\\.%d]+),([-+\\.%d]+)")
+    if #ms == 16 then
+        local mn = tablex.map(function(s) return tonumber(s) end, ms)
+        local m = mat4(mn)
+        ui.App.initialLocation = m
+    elseif z then
+        ui.App.initialLocation = mat4.translate(mat4(), mat4(), vec3(tonumber(x), tonumber(y), tonumber(z)))
+    end
+end
 
 -- start app
 require("main")
