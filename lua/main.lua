@@ -27,9 +27,9 @@ app.assetManager:add(assets)
 -- 1, 0.5, 0.01 means 1 meter wide, 0.5 meters tall, and 1 cm deep.
 -- It's a surface, so the depth should be close to zero.
 local mainView = ui.Surface(ui.Bounds(0, 1.2, -2,   6, 5, 0.01))
-mainView.color = {0.7, 0.7, 1.0, 0.2}
+mainView.material.color = {0.7, 0.7, 1.0, 0.2}
 mainView.hasCollider = true
-mainView.hasTransparency = true
+mainView.material.hasTransparency = true
 
 local quitButton = mainView:addSubview(ui.Button(
     ui.Bounds{size=ui.Size(0.12,0.12,0.05)}
@@ -42,7 +42,7 @@ end
 
 local crosshairs = ui.Surface(ui.Bounds(0, 0, 0.1,  0.3, 0.3, 0.3))
 crosshairs.color = {1, 0, 0, 1}
-crosshairs.grabbable = true
+crosshairs.grabbable = false
 crosshairs.texture = assets.crosshairs
 crosshairs.hasTransparency = true
 
