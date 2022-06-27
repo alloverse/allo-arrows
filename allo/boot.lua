@@ -1,6 +1,7 @@
 local projHome = arg[1]
 local url = arg[2]
 local srcDir = projHome.."/lua"
+local alloDir = projHome.."/allo"
 local depsDir = projHome.."/allo/deps"
 local libDir = projHome.."/allo/lib"
 
@@ -29,6 +30,7 @@ end
 
 package.path = package.path
     ..";"..srcDir.."/?.lua"
+    ..";"..alloDir.."/?.lua"
     ..";"..depsDir.."/alloui/lua/?.lua"
     ..";"..depsDir.."/alloui/lib/cpml/?.lua"
     ..";"..depsDir.."/alloui/lib/pl/lua/?.lua"
@@ -36,20 +38,20 @@ package.path = package.path
 -- Establish globals
 local ffi = require 'ffi'
 local libav_available, av = pcall(ffi.load, libDir .. "/liballonet_av."..dylibext, true)
-if libav_available then
-    -- loads allonet via weak linking
+if not libav_available then
+    av = nil
+    print("NOTE: liballonet_av not available, h264 cannot be used")
+
+    -- load liballonet
+    allonet = ffi.load(libDir .. "/liballonet."..dylibext, false)
+else
+    -- also loads allonet via weak linking
     print("liballonet_av loaded with libavcodec support")
     ffi.load(libDir .. "/liballonet."..dylibext, false)
     ffi.cdef [[
     void allo_libav_initialize(void);
     ]]
     ffi.C.allo_libav_initialize()
-else
-    av = nil
-    print("NOTE: liballonet_av not available, h264 cannot be used")
-
-    -- load liballonet
-    allonet = ffi.load(libDir .. "/liballonet."..dylibext, false)
 end
  
 Client = require("alloui.client")
@@ -59,18 +61,18 @@ tablex = require('pl.tablex')
 pretty = require('pl.pretty')
 vec3 = require("modules.vec3")
 mat4 = require("modules.mat4")
+local json = require("json")
 
-ui.App.initialLocation = nil
 ui.VideoSurface.libavAvailable = libav_available
-if arg[3] then
-    local ms = {string.match(arg[3], "([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+), ([-+\\.%d]+)")}
-    local x, y, z = string.match(arg[3], "([-+\\.%d]+),([-+\\.%d]+),([-+\\.%d]+)")
-    if #ms == 16 then
-        local mn = tablex.map(function(s) return tonumber(s) end, ms)
-        local m = mat4(mn)
-        ui.App.initialLocation = m
-    elseif z then
-        ui.App.initialLocation = mat4.translate(mat4(), mat4(), vec3(tonumber(x), tonumber(y), tonumber(z)))
+
+ui.App.launchArguments = {}
+ui.App.initialLocation = nil
+local launchArgss = os.getenv("ALLO_APP_BOOT_ARGS")
+local status, launchArgs = pcall(json.decode, launchArgss)
+if status then
+    ui.App.launchArguments = launchArgs
+    if launchArgs.initialLocation then
+        ui.App.initialLocation = mat4(launchArgs.initialLocation)
     end
 end
 

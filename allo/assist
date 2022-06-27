@@ -15,6 +15,9 @@ do_help () {
     echo "        the lockfiles, and then does a fetch of them."
     echo "    run <url>"
     echo "        Runs your alloapp and connects it to <url>"
+    echo "    serve"
+    echo "        allows users to launch your app into places over a HTTP gateway."
+    echo "        Read more at https://docs.alloverse.com/hosting"
     exit
 }
 
@@ -34,6 +37,10 @@ do_run () {
     $LUAJIT "$HERE/boot.lua" "$HERE/.." $*
 }
 
+do_serve () {
+    python3 "$HERE/serve.py" $*
+}
+
 if [ "$#" -lt 1 ]; then
     do_help
     exit
@@ -45,6 +52,9 @@ case $1 in
     ;;
     fetch )
         do_fetch
+    ;;
+    serve )
+        do_serve ${2-}
     ;;
     run )
         if [ "$#" -lt 2 ]; then
